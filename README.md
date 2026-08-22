@@ -75,12 +75,14 @@ Then set dsh as your default once via the menu entry (or run
 | `~/.cache/omarchy/agent-usage/dsh-balance.json` | Balance probe cache (15 min) |
 | `~/.local/share/applications/DeepSeek Harness.desktop` | Web-app launcher |
 
-Removal:
+Removal (also recorded in `manifest.json` under `uninstall`):
 
 ```bash
 omarchy plugin remove ziouf.dsh
 omarchy-webapp-remove "DeepSeek Harness"
-rm -f ~/.config/omarchy/defaults/agent   # or pick another default agent
+rm -f ~/.local/state/omarchy/dsh/web-url ~/.cache/omarchy/agent-usage/dsh-balance.json
+# optional: pick another default agent, restore the stock keybinding, and drop
+# the setup.default.agent.dsh menu entry — see manifest.json > uninstall.optional
 ```
 
 ## License

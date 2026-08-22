@@ -12,5 +12,20 @@
   "keepLoaded": true,
   "entryPoints": {
     "service": "Service.qml"
+  },
+  "uninstall": {
+    "commands": [
+      "omarchy plugin remove ziouf.dsh",
+      "omarchy-webapp-remove \"DeepSeek Harness\"",
+      "rm -f \"$HOME/.local/state/omarchy/dsh/web-url\"",
+      "rm -f \"$HOME/.cache/omarchy/agent-usage/dsh-balance.json\""
+    ],
+    "optional": [
+      "rm -f \"$HOME/.config/omarchy/defaults/agent\"  # or pick another default agent",
+      "# restore the agent keybinding in ~/.config/hypr/bindings.lua if rebound:",
+      "#   o.bind(\"SUPER + SHIFT + CTRL + A\", \"Agent\", \"omarchy-agent --pick\")",
+      "# remove the setup.default.agent.dsh entry from ~/.config/omarchy/extensions/omarchy-menu.jsonc if added"
+    ],
+    "notes": "The background dsh web server runs as a child of omarchy-shell; removing the plugin stops it on the next shell restart."
   }
 }

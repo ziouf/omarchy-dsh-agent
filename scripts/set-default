@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Make DeepSeek Harness (dsh) the default coding agent: install it if needed,
+# then write it to ~/.config/omarchy/defaults/agent — the same file
+# omarchy-default-agent reads. The packaged setter does not know dsh, so the
+# menu entry for dsh routes here instead.
+set -euo pipefail
+
+PACKAGE="npm:@deepseek-ai/dsh"
+AGENT_FILE="$HOME/.config/omarchy/defaults/agent"
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+notify() {
+  command -v omarchy-notification-send >/dev/null &&
+    omarchy-notification-send -g 󰚩 "DeepSeek Harness" "$1" || true
+}
+
+if ! command -v dsh >/dev/null 2>&1 && ! mise where "$PACKAGE" &>/dev/null; then
+  echo "Installing DeepSeek Harness ($PACKAGE)..."
+  if ! mise use -g "$PACKAGE"; then
+    # mise cannot install prerelease npm packages non-interactively; fall back
+    # to a plain global install under the mise-managed node.
+    if ! npm install -g --allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs @deepseek-ai/dsh; then
+      notify "Install failed. Check that Node >= 24 is available via mise."
+      exit 1
+    fi
+  fi
+fi
+
+mkdir -p "$(dirname "$AGENT_FILE")"
+printf 'dsh\n' >"$AGENT_FILE"
+
+# Ship the web-app launcher so "dsh" resolves in the app menu out of the box.
+"$PLUGIN_DIR/scripts/install-webapp"
+
+notify "dsh is now your default coding agent."

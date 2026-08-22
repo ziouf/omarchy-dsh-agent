@@ -1,0 +1,275 @@
+#!/bin/bash
+
+# Prints the DeepSeek Harness (dsh) usage record as JSON and writes it to
+# ~/.local/state/omarchy/agents/usage/dsh.json, where the Agents panel picks
+# it up. Same record contract as the packaged omarchy-agent-usage-* collectors;
+# lives outside $OMARCHY_PATH because that tree is owned by the package.
+#
+# DeepSeek's API is prepaid, so like the Fireworks collector this reports a
+# balance ledger from the /user/balance endpoint instead of rate limits. Local
+# token stats are a best-effort scan of the session event logs under $DSH_HOME
+# (default ~/.dsh); dsh is a developer preview and its on-disk format may move,
+# so anything unrecognized is skipped rather than guessed at.
+#
+# Flags --force and --limits-only exist so every collector takes one shape.
+set -euo pipefail
+
+AGENT_ID="dsh"
+AGENT_NAME="DeepSeek Harness"
+BALANCE_ENDPOINT="https://api.deepseek.com/user/balance"
+CACHE_SECONDS=900
+
+FORCE=false
+for arg in "$@"; do
+  case "$arg" in
+  --force) FORCE=true ;;
+  esac
+done
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents/usage"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/agent-usage"
+DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
+mkdir -p "$STATE_DIR" "$CACHE_DIR"
+
+now=$(date +%s)
+today=$(date +%F)
+
+empty_stats() {
+  cat <<'EOF'
+{"todayPrompts":0,"todaySessions":0,"todayTotalTokens":0,"todayTokensByModel":{},"recentDays":[],"totalPrompts":0,"totalSessions":0,"activeDays":0,"activeDates":[],"modelUsage":{}}
+EOF
+}
+
+# ---------------------------------------------------------------- credentials
+
+find_api_key() {
+  if [[ -n ${DEEPSEEK_API_KEY:-} ]]; then
+    printf '%s\n' "$DEEPSEEK_API_KEY"
+    return 0
+  fi
+  local env_file="$DSH_HOME/.env"
+  [[ -f $env_file ]] || return 1
+  # .env spelling: KEY=value, optional quotes, optional export.
+  sed -n 's/^[[:space:]]*\(export[[:space:]]\+\)\?DEEPSEEK_API_KEY=["'"'"']\{0,1\}\([^"'"'"'\n]*\)["'"'"']\{0,1\}[[:space:]]*$/\2/p' "$env_file" | head -n1
+}
+
+# ---------------------------------------------------------------- local stats
+
+scan_local_stats() {
+  python3 - "$DSH_HOME" "$today" <<'PYEOF'
+import datetime as dt
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).expanduser()
+today = sys.argv[2]
+recent_dates = [(dt.date.fromisoformat(today) - dt.timedelta(days=o)).isoformat() for o in range(6, -1, -1)]
+recent = {d: 0 for d in recent_dates}
+
+def tok(usage, *keys):
+    for k in keys:
+        try:
+            v = float(usage.get(k) or 0)
+            if v > 0:
+                return round(v)
+        except Exception:
+            pass
+    return 0
+
+seen = set()
+sessions = set()
+active = set()
+today_sids = set()
+models = {}
+prompts = 0
+t_prompts = t_tokens = 0
+t_models = {}
+
+if root.is_dir():
+    files = [p for p in root.rglob("*") if p.suffix in (".jsonl", ".json") and p.is_file()
+             and ("session" in p.name.lower() or "event" in p.name.lower() or "log" in p.name.lower())]
+    for path in files:
+        try:
+            handle = path.open("r", encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        with handle:
+            for i, line in enumerate(handle):
+                if '"usage"' not in line:
+                    continue
+                key = f"{path}:{i}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                msg = entry.get("message") if isinstance(entry.get("message"), dict) else entry
+                usage = msg.get("usage")
+                if not isinstance(usage, dict):
+                    continue
+                inp = tok(usage, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens", "input", "prompt")
+                out = tok(usage, "output_tokens", "outputTokens", "completion_tokens", "completionTokens", "output", "completion")
+                cr = tok(usage, "cache_read_input_tokens", "cacheReadInputTokens", "cache_read_tokens", "cacheRead", "cached_tokens", "cacheReadTokens")
+                cw = tok(usage, "cache_creation_input_tokens", "cacheCreationInputTokens", "cache_write_tokens", "cacheWrite")
+                total = inp + out + cr + cw
+                if total <= 0:
+                    total = tok(usage, "total_tokens", "totalTokens")
+                    inp = total
+                if total <= 0:
+                    continue
+                model = str(msg.get("model") or entry.get("model") or "deepseek").rsplit("/", 1)[-1]
+                day = today
+                ts = msg.get("timestamp") or entry.get("timestamp") or entry.get("time") or ""
+                s = str(ts)
+                if s.isdigit():
+                    secs = float(s) / (1000.0 if float(s) > 10**11 else 1.0)
+                    day = dt.datetime.fromtimestamp(secs).date().isoformat()
+                elif s:
+                    try:
+                        day = dt.datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone().date().isoformat()
+                    except Exception:
+                        pass
+                sid = str(entry.get("sessionId") or entry.get("session_id") or path)
+                bucket = models.setdefault(model, {"inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0})
+                bucket["inputTokens"] += inp
+                bucket["outputTokens"] += out
+                bucket["cacheReadInputTokens"] += cr
+                bucket["cacheCreationInputTokens"] += cw
+                sessions.add(sid)
+                active.add(day)
+                prompts += 1
+                if day in recent:
+                    recent[day] += total
+                if day == today:
+                    today_sids.add(sid)
+                    t_prompts += 1
+                    t_tokens += total
+                    t_models[model] = t_models.get(model, 0) + total
+
+print(json.dumps({
+    "todayPrompts": t_prompts,
+    "todaySessions": len(today_sids),
+    "todayTotalTokens": t_tokens,
+    "todayTokensByModel": t_models,
+    "recentDays": [{"date": d, "messageCount": recent[d]} for d in recent_dates],
+    "modelUsage": models,
+    "totalPrompts": prompts,
+    "totalSessions": len(sessions),
+    "activeDays": len(active),
+    "activeDates": sorted(active),
+}, separators=(",", ":"), sort_keys=True))
+PYEOF
+}
+
+# ------------------------------------------------------------------- balance
+
+balance_cache="$CACHE_DIR/dsh-balance.json"
+
+probe_balance() {
+  local key response
+  key=$(find_api_key) || return 1
+  response=$(curl -sS --max-time 10 "$BALANCE_ENDPOINT" \
+    -H "Authorization: Bearer $key" -H "Accept: application/json" 2>/dev/null) || return 1
+  # Response: {"is_available":bool,"balance_infos":[{"currency":"CNY","total_balance":"110.00",
+  #            "granted_balance":"10.00","topped_up_balance":"100.00"}]}
+  printf '%s' "$response" | jq -e '
+    (.balance_infos | type == "array" and length > 0) as $ok |
+    select($ok) |
+    .balance_infos[0] |
+    {
+      remaining: (.total_balance | tonumber? // null),
+      granted: ((.granted_balance // "") | if . == "" then null else tonumber? end),
+      toppedUp: ((.topped_up_balance // "") | if . == "" then null else tonumber? end),
+      currency: (.currency // "")
+    } | select(.remaining != null)' 2>/dev/null
+}
+
+balance=""
+if cached=$(cat "$balance_cache" 2>/dev/null) && [[ $FORCE == false ]]; then
+  fetched=$(jq -r '.fetchedAt // 0' <<<"$cached" 2>/dev/null || echo 0)
+  if (( now - fetched < CACHE_SECONDS )); then
+    balance=$(jq -c '.balance' <<<"$cached" 2>/dev/null || true)
+  fi
+fi
+if [[ -z $balance || $balance == null ]]; then
+  if balance=$(probe_balance); then
+    printf '{"fetchedAt":%s,"balance":%s}\n' "$now" "$balance" >"$balance_cache"
+  else
+    balance=""
+  fi
+fi
+
+# -------------------------------------------------------------------- record
+
+ready=false
+has_stats=false
+status_text=""
+auth_text=""
+
+stats=$(scan_local_stats)
+prompts=$(jq -r '.totalPrompts' <<<"$stats")
+
+if [[ -n $balance ]]; then
+  ready=true
+  has_stats=true
+elif [[ $prompts -gt 0 ]]; then
+  ready=true
+  has_stats=true
+else
+  status_text="Waiting for auth"
+  auth_text="Set DEEPSEEK_API_KEY (or add it to ~/.dsh/.env) to show your DeepSeek balance."
+fi
+
+record=$(jq -n \
+  --arg id "$AGENT_ID" \
+  --arg name "$AGENT_NAME" \
+  --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson ready "$ready" \
+  --argjson hasStats "$has_stats" \
+  --arg statusText "$status_text" \
+  --arg authText "$auth_text" \
+  --argjson stats "$stats" \
+  --argjson balance "${balance:-null}" \
+  '{
+    schemaVersion: 1,
+    id: $id,
+    name: $name,
+    updatedAt: $updatedAt,
+    ready: $ready,
+    hasLocalStats: $hasStats,
+    scope: "account",
+    hasPromptStats: false,
+    tierLabel: (if $balance != null then "Pay as you go" else "" end),
+    usageStatusText: $statusText,
+    authHelpText: $authText,
+    limits: []
+  } + $stats
+  + (if $balance != null then
+      { balance: (
+          if (($balance.granted // 0) + ($balance.toppedUp // 0)) > 0 then
+            {
+              remaining: $balance.remaining,
+              funded: (($balance.granted // 0) + ($balance.toppedUp // 0)),
+              spent: ((($balance.granted // 0) + ($balance.toppedUp // 0)) - $balance.remaining),
+              currency: ($balance.currency // ""),
+              estimated: false
+            }
+          else
+            { remaining: $balance.remaining, currency: ($balance.currency // ""), estimated: false }
+          end
+        ) }
+    else {} end)' 2>&1)
+
+if ! jq -e . >/dev/null 2>&1 <<<"$record"; then
+  echo "collect-usage: failed to build record" >&2
+  exit 1
+fi
+
+tmp=$(mktemp "$STATE_DIR/.$AGENT_ID.XXXXXX")
+printf '%s\n' "$record" >"$tmp"
+mv "$tmp" "$STATE_DIR/$AGENT_ID.json"
+
+printf '%s\n' "$record"

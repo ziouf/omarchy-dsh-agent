@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Create (or refresh) the "DeepSeek Harness" web app launcher: a .desktop
+# entry that opens/focuses the dsh web UI as its own window. Idempotent —
+# safe to re-run from set-default on every menu action.
+set -euo pipefail
+
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ICON="$PLUGIN_DIR/assets/dsh.svg"
+
+# The Exec line goes through the plugin script so it always reads the URL the
+# running instance reported, and so launch-or-focus reuses one window instead
+# of stacking duplicates.
+omarchy-webapp-install "DeepSeek Harness" "http://127.0.0.1:3080" "$ICON" \
+  "$PLUGIN_DIR/scripts/open-web"
+
+# The Apps section of the Omarchy menu builds its search aliases from the
+# entry's Keywords= field; "dsh" is the short handle people type.
+DESKTOP="$HOME/.local/share/applications/DeepSeek Harness.desktop"
+if [[ -f $DESKTOP ]] && ! grep -q '^Keywords=' "$DESKTOP"; then
+  printf 'Keywords=dsh;deepseek;harness;ai;agent;\n' >>"$DESKTOP"
+fi

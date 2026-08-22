@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Launch the default coding agent, with DeepSeek Harness (dsh) support.
+#
+# omarchy-agent hard-codes the agents Omarchy ships with and exits with
+# "Unsupported default agent" for anything else, so this dispatcher stands in
+# front of it: any other default agent is forwarded untouched; dsh opens its
+# web UI (kept running in the background by this plugin's service) as a
+# dedicated app window, reusing an existing one instead of stacking windows.
+
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+agent=$(omarchy-default-agent 2>/dev/null || true)
+if [[ $agent != "dsh" ]]; then
+  exec omarchy-agent "$@"
+fi
+
+while (($#)); do
+  case "$1" in
+  --pick) exec omarchy-menu summon setup.default.agent ;;
+  --prompt) shift ;; # web UI has no prompt handoff; ignored
+  esac
+  shift
+done
+
+if omarchy-cmd-missing dsh; then
+  echo "dsh is not installed. Pick it once via the menu: Setup > Defaults > Agent > DeepSeek Harness." >&2
+  exit 1
+fi
+
+exec "$PLUGIN_DIR/scripts/open-web"

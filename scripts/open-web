@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# Open (or focus) the DeepSeek Harness web UI as a dedicated app window.
+#
+# The URL comes from the state file the cyril.dsh service keeps in sync with
+# whatever `dsh web` actually printed, falling back to the default address.
+# Waits briefly for the server so a fresh login does not open an error page,
+# then reuses the existing window through its org.omarchy.dsh class instead of
+# stacking duplicates.
+set -euo pipefail
+
+STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/dsh/web-url"
+DEFAULT_URL="http://127.0.0.1:3080"
+
+# Chromium-derived browsers name app windows after the URL host
+# (<browser>-<host>__-…), and drop --class when handing off to an already
+# running session, so focus matches on the host embedded in the real class.
+WINDOW_PATTERN="127.0.0.1"
+
+url=$(cat "$STATE_FILE" 2>/dev/null || true)
+[[ $url =~ ^https?:// ]] || url="$DEFAULT_URL"
+
+host_port=${url#http*://}
+host_port=${host_port%%/*}
+for _ in $(seq 1 20); do
+  if curl -sS --max-time 2 -o /dev/null "$url"; then
+    break
+  fi
+  sleep 0.5
+done
+
+exec omarchy-launch-or-focus-webapp "$WINDOW_PATTERN" "$url"

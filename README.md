@@ -84,13 +84,20 @@ blend into the rest of Omarchy:
 
 ```jsonc
 "setup.default.agent.dsh": {
-  "icon": "🐳",
+  "appIcon": "~/.config/omarchy/plugins/ziouf.dsh/assets/dsh.svg",
   "label": "DeepSeek Harness",
   "when": "omarchy-cmd-present dsh",
   "checked": "[[ \"$(omarchy-default-agent)\" == \"dsh\" ]]",
   "action": "$HOME/.config/omarchy/plugins/ziouf.dsh/scripts/set-default"
 }
 ```
+
+The `appIcon` image rendering is a local extension: the stock menu only draws
+font glyphs for static rows. It comes from a cloned menu plugin
+(`omarchy plugin clone omarchy.menu`, then teach its `MenuModel.js` to parse
+`appIcon` and its delegate to render the file, picking the `-light` twin on
+light surfaces). Without that clone the entry still works — swap `appIcon`
+for an `"icon"` font glyph of your choice.
 
 **Keybinding** — Omarchy's agent keybinding (`Super+Shift+Ctrl+A`) only knows
 the built-in agents. To route it through this plugin (it launches dsh's web

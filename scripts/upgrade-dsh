@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Align the installed dsh with the version pinned in lib.sh.
+#
+# Plugin updates never touch the dsh package (set-default only bootstraps a
+# missing install), so this is the one command that moves it: run it after the
+# pin in lib.sh changes. The web server is killed at the end; the plugin
+# service watchdog brings it back on the new build within seconds.
+set -euo pipefail
+
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+installed=$(dsh --version 2>/dev/null || true)
+
+if [[ -z $installed ]]; then
+  # Nothing installed: the bootstrap path is set-default's job.
+  exec "$PLUGIN_DIR/scripts/set-default"
+fi
+
+if [[ $installed == "$DSH_VERSION" ]]; then
+  echo "dsh is already at the pinned version ($installed)."
+  exit 0
+fi
+
+echo "Upgrading dsh: $installed -> $DSH_VERSION"
+install_dsh || {
+  notify "Upgrade failed. Check that Node >= 24 is available via mise."
+  exit 1
+}
+
+new_version=$(dsh --version 2>/dev/null || echo unknown)
+pkill -f "dsh web --no-open" 2>/dev/null || true
+notify "dsh upgraded: $installed -> $new_version. Web UI restarts automatically."

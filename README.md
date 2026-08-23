@@ -46,6 +46,21 @@ the model-facing skill tool), append to
 Then restart the web UI (restarting Omarchy does it — this service brings dsh
 back with the patch applied).
 
+## Upgrading dsh
+
+Updating the plugin never touches the installed `dsh` package — the pin in
+`scripts/lib.sh` only governs fresh installs. After a plugin update that bumps
+the pin, align the binary:
+
+```bash
+~/.config/omarchy/plugins/ziouf.dsh/scripts/upgrade-dsh
+```
+
+It is a no-op when the installed version already matches, installs the pinned
+version otherwise (mise first, npm fallback), kills the web server so the
+service watchdog brings it back on the new build, and notifies with the
+version transition.
+
 ## Requirements
 
 - Omarchy (Quattro or newer)

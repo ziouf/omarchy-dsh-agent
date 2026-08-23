@@ -8,27 +8,13 @@ set -euo pipefail
 
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-# Pinned upstream release. Bump deliberately (edit the version once) and
-# re-run a fresh install afterwards; never install a moving tag from here.
-DSH_VERSION="0.1.1-rc.2"
-DSH_MISE_SPEC="npm:@deepseek-ai/dsh@$DSH_VERSION"
-DSH_NPM_SPEC="${DSH_MISE_SPEC#npm:}"
-# Lifecycle scripts kept to the two packages with native bindings dsh needs at
-# runtime. Everything else installs without running its postinstall.
-DSH_ALLOW_SCRIPTS="--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty"
-
 AGENT_FILE="$HOME/.config/omarchy/defaults/agent"
 
 if ! command -v dsh >/dev/null 2>&1; then
-  echo "Installing DeepSeek Harness ($DSH_MISE_SPEC)..."
-  if ! mise use -g "$DSH_MISE_SPEC"; then
-    # mise cannot install prerelease npm packages non-interactively; fall back
-    # to a pinned plain global install under the mise-managed node.
-    if ! npm install -g $DSH_ALLOW_SCRIPTS "$DSH_NPM_SPEC"; then
-      notify "Install failed. Check that Node >= 24 is available via mise."
-      exit 1
-    fi
-  fi
+  install_dsh || {
+    notify "Install failed. Check that Node >= 24 is available via mise."
+    exit 1
+  }
 fi
 
 mkdir -p "$(dirname "$AGENT_FILE")"

@@ -114,6 +114,36 @@ Item {
     command: [root.pluginDir + "/scripts/collect-usage"]
   }
 
+  // The web-app .desktop carries an absolute Exec path into this plugin
+  // folder, so renaming or reinstalling the plugin under a different id would
+  // silently strand it. On startup: if the entry is missing or its Exec no
+  // longer resolves to an executable file, regenerate it.
+  Process {
+    id: healWebapp
+
+    command: [root.pluginDir + "/scripts/install-webapp"]
+  }
+
+  Process {
+    id: checkWebapp
+
+    command: ["bash", "-lc",
+      "f=\"$HOME/.local/share/applications/DeepSeek Harness.desktop\"; " +
+      "x=$(sed -n 's/^Exec=//p' \"$f\"); " +
+      "[[ -n $x && -x $x ]] && echo ok || echo broken"]
+
+    stdout: StdioCollector {
+      id: webappProbe
+
+      onStreamFinished: {
+        if (webappProbe.text.trim() !== "ok") {
+          console.log("ziouf.dsh: repairing DeepSeek Harness desktop entry")
+          healWebapp.running = true
+        }
+      }
+    }
+  }
+
   Timer {
     interval: root.refreshIntervalSec * 1000
     running: true
@@ -123,5 +153,8 @@ Item {
       collectProcess.running = true
   }
 
-  Component.onCompleted: mkdirProcess.running = true
+  Component.onCompleted: {
+    mkdirProcess.running = true
+    checkWebapp.running = true
+  }
 }

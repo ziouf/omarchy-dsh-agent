@@ -15,7 +15,9 @@ omarchy plugin add https://github.com/ziouf/omarchy-dsh-agent.git --enable
   custom port still opens the right address.
 - **Web app** — installs a "DeepSeek Harness" launcher (searchable as `dsh`)
   that opens the UI in its own app window and focuses it instead of stacking
-  duplicates.
+  duplicates. The service re-creates the launcher at shell startup whenever
+  its Exec path no longer resolves (e.g. after reinstalling the plugin under
+  a different id).
 - **Agents panel** — regenerates the `dsh.json` usage record every 15 minutes,
   so Omarchy's Agents bar panel gains a DSH tab: DeepSeek prepaid balance
   (`remaining / funded / spent`) plus best-effort local token stats scanned

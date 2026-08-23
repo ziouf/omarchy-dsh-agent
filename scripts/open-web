@@ -18,6 +18,14 @@ DEFAULT_URL="http://127.0.0.1:3080"
 WINDOW_PATTERN="127.0.0.1"
 
 url=$(cat "$STATE_FILE" 2>/dev/null || true)
+# Defense in depth with the service: only loopback web URLs are honored. A
+# tampered state file must not turn this launcher into a redirect.
+local_url_re='^https?://(localhost|127(\.[0-9]+){3}|\[::1\])(:[0-9]+)?([/?#].*)?$'
+if [[ $url =~ $local_url_re ]]; then
+  :
+else
+  url=""
+fi
 [[ $url =~ ^https?:// ]] || url="$DEFAULT_URL"
 
 host_port=${url#http*://}

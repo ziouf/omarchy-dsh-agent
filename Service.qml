@@ -25,9 +25,26 @@ Item {
 
   property string webUrl: ""
 
+  // Only loopback addresses are accepted: the web UI is local, and anything
+  // else printed on stdout would send the desktop browser somewhere this
+  // plugin never intended.
+  function isLocalWebUrl(u) {
+    var m = String(u).match(/^https?:\/\/(\[[0-9a-fA-F:]+\]|[^\/:?#\s]+)(:\d+)?(?:[\/?#].*)?$/)
+    if (!m)
+      return false
+    var host = m[1]
+    if (host === "localhost" || host === "[::1]")
+      return true
+    return /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(host)
+  }
+
   function writeWebUrl(url) {
     if (!url || url === root.webUrl)
       return
+    if (!isLocalWebUrl(url)) {
+      console.log("ziouf.dsh: ignoring non-local URL reported by dsh: " + url)
+      return
+    }
     root.webUrl = url
     urlFile.path = root.stateDir + "/web-url"
     urlFile.setText(url + "\n")

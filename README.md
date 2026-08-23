@@ -27,6 +27,25 @@ DeepSeek's API is prepaid, so like Fireworks the tab shows a credit balance
 instead of rate-limit meters. dsh itself is a developer preview; unrecognized
 session formats are skipped rather than guessed at.
 
+## Skill plugins
+
+The bundled skill capability family ships with dsh but is partially disabled
+by default. To run the full set (skills on disk, workspace instruction files,
+the model-facing skill tool), append to
+`~/.dsh/profiles/web/cordis.patch.yml`:
+
+```yaml
+- id: agent-instructions
+  disabled: false
+- id: skill-filesystem
+  disabled: false
+- id: tool-skill
+  disabled: false
+```
+
+Then restart the web UI (restarting Omarchy does it — this service brings dsh
+back with the patch applied).
+
 ## Requirements
 
 - Omarchy (Quattro or newer)

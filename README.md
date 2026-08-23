@@ -18,6 +18,10 @@ omarchy plugin add https://github.com/ziouf/omarchy-dsh-agent.git --enable
   duplicates. The service re-creates the launcher at shell startup whenever
   its Exec path no longer resolves (e.g. after reinstalling the plugin under
   a different id).
+- **Marks** — `assets/dsh.svg` (light tone, dark surfaces) and
+  `assets/dsh-light.svg` (dark tone, light surfaces) are monochrome whale
+  glyphs with no brand color, following the Agents panel's `-light` twin
+  convention.
 - **Agents panel** — regenerates the `dsh.json` usage record every 15 minutes,
   so Omarchy's Agents bar panel gains a DSH tab: DeepSeek prepaid balance
   (`remaining / funded / spent`) plus best-effort local token stats scanned
@@ -80,7 +84,7 @@ blend into the rest of Omarchy:
 
 ```jsonc
 "setup.default.agent.dsh": {
-  "icon": "\uf16d",
+  "icon": "🐳",
   "label": "DeepSeek Harness",
   "when": "omarchy-cmd-present dsh",
   "checked": "[[ \"$(omarchy-default-agent)\" == \"dsh\" ]]",

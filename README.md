@@ -80,7 +80,9 @@ Removal (also recorded in `manifest.json` under `uninstall`):
 ```bash
 omarchy plugin remove ziouf.dsh
 omarchy-webapp-remove "DeepSeek Harness"
-rm -f ~/.local/state/omarchy/dsh/web-url ~/.cache/omarchy/agent-usage/dsh-balance.json
+rm -f ~/.local/state/omarchy/dsh/web-url \
+      ~/.local/state/omarchy/agents/usage/dsh.json \
+      ~/.cache/omarchy/agent-usage/dsh-balance.json
 # optional: pick another default agent, restore the stock keybinding, and drop
 # the setup.default.agent.dsh menu entry — see manifest.json > uninstall.optional
 ```

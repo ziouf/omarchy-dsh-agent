@@ -18,6 +18,7 @@
       "omarchy plugin remove ziouf.dsh",
       "omarchy-webapp-remove \"DeepSeek Harness\"",
       "rm -f \"$HOME/.local/state/omarchy/dsh/web-url\"",
+      "rm -f \"$HOME/.local/state/omarchy/agents/usage/dsh.json\"",
       "rm -f \"$HOME/.cache/omarchy/agent-usage/dsh-balance.json\""
     ],
     "optional": [

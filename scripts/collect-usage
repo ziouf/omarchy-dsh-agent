@@ -54,18 +54,34 @@ find_api_key() {
 }
 
 # ---------------------------------------------------------------- local stats
+#
+# The scan is bounded on every axis: a rolling 30-day window by file mtime, at
+# most MAX_FILES files (newest first), skipping files over MAX_FILE_BYTES, and
+# a total budget of MAX_TOTAL_BYTES. Whatever the record aggregates is capped
+# too — 90 days of active dates and the 20 heaviest models — because this JSON
+# lands in shell-consumed state and must never grow without limit.
 
 scan_local_stats() {
   python3 - "$DSH_HOME" "$today" <<'PYEOF'
 import datetime as dt
 import json
 import sys
+import time
 from pathlib import Path
 
 root = Path(sys.argv[1]).expanduser()
 today = sys.argv[2]
+
+SCAN_WINDOW_DAYS = 30
+MAX_FILES = 500
+MAX_FILE_BYTES = 5 * 1024 * 1024
+MAX_TOTAL_BYTES = 50 * 1024 * 1024
+MAX_ACTIVE_DATES = 90
+MAX_MODELS = 20
+
 recent_dates = [(dt.date.fromisoformat(today) - dt.timedelta(days=o)).isoformat() for o in range(6, -1, -1)]
 recent = {d: 0 for d in recent_dates}
+oldest_kept = (dt.date.fromisoformat(today) - dt.timedelta(days=MAX_ACTIVE_DATES - 1)).isoformat()
 
 def tok(usage, *keys):
     for k in keys:
@@ -77,6 +93,21 @@ def tok(usage, *keys):
             pass
     return 0
 
+def cap_model_counts(d):
+    if len(d) <= MAX_MODELS:
+        return d
+    return dict(sorted(d.items(), key=lambda kv: -kv[1])[:MAX_MODELS])
+
+def cap_model_buckets(d):
+    if len(d) <= MAX_MODELS:
+        return d
+    ranked = sorted(
+        d.items(),
+        key=lambda kv: -(kv[1].get("inputTokens", 0) + kv[1].get("outputTokens", 0)
+                         + kv[1].get("cacheReadInputTokens", 0) + kv[1].get("cacheCreationInputTokens", 0)),
+    )[:MAX_MODELS]
+    return dict(ranked)
+
 seen = set()
 sessions = set()
 active = set()
@@ -87,9 +118,29 @@ t_prompts = t_tokens = 0
 t_models = {}
 
 if root.is_dir():
-    files = [p for p in root.rglob("*") if p.suffix in (".jsonl", ".json") and p.is_file()
-             and ("session" in p.name.lower() or "event" in p.name.lower() or "log" in p.name.lower())]
-    for path in files:
+    cutoff = time.time() - SCAN_WINDOW_DAYS * 86400
+    candidates = []
+    for p in root.rglob("*"):
+        if p.suffix not in (".jsonl", ".json") or not p.is_file():
+            continue
+        name = p.name.lower()
+        if "session" not in name and "event" not in name and "log" not in name:
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        if st.st_mtime < cutoff or st.st_size > MAX_FILE_BYTES:
+            continue
+        candidates.append((st.st_mtime, st.st_size, p))
+    # Newest first; when the file budget runs out, old sessions are what drop.
+    candidates.sort(reverse=True)
+
+    remaining = MAX_TOTAL_BYTES
+    for _, size, path in candidates[:MAX_FILES]:
+        if remaining <= 0:
+            break
+        remaining -= size
         try:
             handle = path.open("r", encoding="utf-8", errors="replace")
         except OSError:
@@ -149,17 +200,20 @@ if root.is_dir():
                     t_tokens += total
                     t_models[model] = t_models.get(model, 0) + total
 
+# Bound everything the record carries: only dates inside the 90-day window
+# travel, and model breakdowns keep the heaviest MAX_MODELS entries.
+kept_active = sorted(d for d in active if d >= oldest_kept)
 print(json.dumps({
     "todayPrompts": t_prompts,
     "todaySessions": len(today_sids),
     "todayTotalTokens": t_tokens,
-    "todayTokensByModel": t_models,
+    "todayTokensByModel": cap_model_counts(t_models),
     "recentDays": [{"date": d, "messageCount": recent[d]} for d in recent_dates],
-    "modelUsage": models,
+    "modelUsage": cap_model_buckets(models),
     "totalPrompts": prompts,
     "totalSessions": len(sessions),
-    "activeDays": len(active),
-    "activeDates": sorted(active),
+    "activeDays": len(kept_active),
+    "activeDates": kept_active,
 }, separators=(",", ":"), sort_keys=True))
 PYEOF
 }
@@ -169,10 +223,14 @@ PYEOF
 balance_cache="$CACHE_DIR/dsh-balance.json"
 
 probe_balance() {
-  local key response
+  local key
   key=$(find_api_key) || return 1
-  response=$(curl -sS --max-time 10 "$BALANCE_ENDPOINT" \
-    -H "Authorization: Bearer $key" -H "Accept: application/json" 2>/dev/null) || return 1
+  # The key travels through a curl config on stdin, never argv: a -H header
+  # would put it in /proc/<pid>/cmdline, readable by every process on the box.
+  # Escape the two characters curl config quoting treats specially.
+  response=$(printf 'silent\nshow-error\nmax-time = 10\nheader = "Accept: application/json"\nheader = "Authorization: Bearer %s"\nurl = "%s"\n' \
+    "$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' <<<"$key")" "$BALANCE_ENDPOINT" |
+    curl --config - 2>/dev/null) || return 1
   # Response: {"is_available":bool,"balance_infos":[{"currency":"CNY","total_balance":"110.00",
   #            "granted_balance":"10.00","topped_up_balance":"100.00"}]}
   printf '%s' "$response" | jq -e '

@@ -1,22 +1,28 @@
 #!/bin/bash
 
 # Create (or refresh) the "DeepSeek Harness" web app launcher: a .desktop
-# entry that opens/focuses the dsh web UI as its own window. Idempotent —
-# safe to re-run from set-default on every menu action.
+# entry that opens/focuses the dsh web UI as its own window. Idempotent and
+# self-healing: exits immediately when the entry already points at this
+# plugin, regenerates it otherwise — so the service can call it at every
+# shell startup to survive a plugin rename or reinstall.
 set -euo pipefail
 
-PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ICON="$PLUGIN_DIR/assets/dsh.svg"
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+# Fast path: healthy entry (Exec resolves to an executable file) → nothing to do.
+exec_path=$(sed -n 's/^Exec=//p' "$DESKTOP_FILE" 2>/dev/null || true)
+[[ -n $exec_path && -x $exec_path && $exec_path == "$PLUGIN_DIR"/* ]] && exit 0
+
+mkdir -p "$STATE_DIR"
 
 # The Exec line goes through the plugin script so it always reads the URL the
 # running instance reported, and so launch-or-focus reuses one window instead
 # of stacking duplicates.
-omarchy-webapp-install "DeepSeek Harness" "http://127.0.0.1:3080" "$ICON" \
+omarchy-webapp-install "$APP_NAME" "$DEFAULT_URL" "$PLUGIN_DIR/assets/dsh.svg" \
   "$PLUGIN_DIR/scripts/open-web"
 
 # The Apps section of the Omarchy menu builds its search aliases from the
 # entry's Keywords= field; "dsh" is the short handle people type.
-DESKTOP="$HOME/.local/share/applications/DeepSeek Harness.desktop"
-if [[ -f $DESKTOP ]] && ! grep -q '^Keywords=' "$DESKTOP"; then
-  printf 'Keywords=dsh;deepseek;harness;ai;agent;\n' >>"$DESKTOP"
+if ! grep -q '^Keywords=' "$DESKTOP_FILE"; then
+  printf 'Keywords=dsh;deepseek;harness;ai;agent;\n' >>"$DESKTOP_FILE"
 fi

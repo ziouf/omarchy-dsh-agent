@@ -2,38 +2,27 @@
 
 # Open (or focus) the DeepSeek Harness web UI as a dedicated app window.
 #
-# The URL comes from the state file the cyril.dsh service keeps in sync with
-# whatever `dsh web` actually printed, falling back to the default address.
-# Waits briefly for the server so a fresh login does not open an error page,
-# then reuses the existing window through its org.omarchy.dsh class instead of
-# stacking duplicates.
+# The URL comes from the state file the service keeps in sync with whatever
+# `dsh web` actually printed, falling back to the default address. Waits
+# briefly for the server so a fresh login does not open an error page, then
+# reuses the existing window instead of stacking duplicates.
 set -euo pipefail
 
-STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/dsh/web-url"
-DEFAULT_URL="http://127.0.0.1:3080"
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # Chromium-derived browsers name app windows after the URL host
-# (<browser>-<host>__-…), and drop --class when handing off to an already
+# (<browser>-<host>__-…) and drop --class when handing off to an already
 # running session, so focus matches on the host embedded in the real class.
 WINDOW_PATTERN="127.0.0.1"
 
-url=$(cat "$STATE_FILE" 2>/dev/null || true)
+url=$(cat "$WEB_URL_FILE" 2>/dev/null || true)
 # Defense in depth with the service: only loopback web URLs are honored. A
 # tampered state file must not turn this launcher into a redirect.
 local_url_re='^https?://(localhost|127(\.[0-9]+){3}|\[::1\])(:[0-9]+)?([/?#].*)?$'
-if [[ $url =~ $local_url_re ]]; then
-  :
-else
-  url=""
-fi
-[[ $url =~ ^https?:// ]] || url="$DEFAULT_URL"
+[[ $url =~ $local_url_re ]] || url="$DEFAULT_URL"
 
-host_port=${url#http*://}
-host_port=${host_port%%/*}
-for _ in $(seq 1 20); do
-  if curl -sS --max-time 2 -o /dev/null "$url"; then
-    break
-  fi
+for _ in {1..20}; do
+  curl -sS --max-time 2 -o /dev/null "$url" && break
   sleep 0.5
 done
 

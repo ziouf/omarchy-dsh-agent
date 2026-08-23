@@ -6,23 +6,20 @@
 # menu entry for dsh routes here instead.
 set -euo pipefail
 
-# Pinned upstream release. Bump deliberately (edit both names together) and
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+# Pinned upstream release. Bump deliberately (edit the version once) and
 # re-run a fresh install afterwards; never install a moving tag from here.
-DSH_MISE_SPEC="npm:@deepseek-ai/dsh@0.1.1-rc.2"
-DSH_NPM_SPEC="@deepseek-ai/dsh@0.1.1-rc.2"
+DSH_VERSION="0.1.1-rc.2"
+DSH_MISE_SPEC="npm:@deepseek-ai/dsh@$DSH_VERSION"
+DSH_NPM_SPEC="${DSH_MISE_SPEC#npm:}"
 # Lifecycle scripts kept to the two packages with native bindings dsh needs at
 # runtime. Everything else installs without running its postinstall.
 DSH_ALLOW_SCRIPTS="--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty"
 
 AGENT_FILE="$HOME/.config/omarchy/defaults/agent"
-PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-notify() {
-  command -v omarchy-notification-send >/dev/null &&
-    omarchy-notification-send -g 󰚩 "DeepSeek Harness" "$1" || true
-}
-
-if ! command -v dsh >/dev/null 2>&1 && ! mise where "npm:@deepseek-ai/dsh" &>/dev/null; then
+if ! command -v dsh >/dev/null 2>&1; then
   echo "Installing DeepSeek Harness ($DSH_MISE_SPEC)..."
   if ! mise use -g "$DSH_MISE_SPEC"; then
     # mise cannot install prerelease npm packages non-interactively; fall back
@@ -40,5 +37,4 @@ printf 'dsh\n' >"$AGENT_FILE"
 # Ship the web-app launcher so "dsh" resolves in the app menu out of the box.
 "$PLUGIN_DIR/scripts/install-webapp"
 
-installed_version=$(dsh --version 2>/dev/null || echo unknown)
-notify "dsh is now your default coding agent (installed: $installed_version)."
+notify "dsh is now your default coding agent ($(dsh --version 2>/dev/null || echo unknown))."

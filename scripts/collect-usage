@@ -34,12 +34,6 @@ mkdir -p "$STATE_DIR" "$CACHE_DIR"
 now=$(date +%s)
 today=$(date +%F)
 
-empty_stats() {
-  cat <<'EOF'
-{"todayPrompts":0,"todaySessions":0,"todayTotalTokens":0,"todayTokensByModel":{},"recentDays":[],"totalPrompts":0,"totalSessions":0,"activeDays":0,"activeDates":[],"modelUsage":{}}
-EOF
-}
-
 # ---------------------------------------------------------------- credentials
 
 find_api_key() {
@@ -93,20 +87,16 @@ def tok(usage, *keys):
             pass
     return 0
 
-def cap_model_counts(d):
+def top_models(d, weight):
+    """Keep the MAX_MODELS heaviest entries; weight maps a value to a number."""
     if len(d) <= MAX_MODELS:
         return d
-    return dict(sorted(d.items(), key=lambda kv: -kv[1])[:MAX_MODELS])
+    ranked = sorted(d.items(), key=lambda kv: -weight(kv[1]))
+    return dict(ranked[:MAX_MODELS])
 
-def cap_model_buckets(d):
-    if len(d) <= MAX_MODELS:
-        return d
-    ranked = sorted(
-        d.items(),
-        key=lambda kv: -(kv[1].get("inputTokens", 0) + kv[1].get("outputTokens", 0)
-                         + kv[1].get("cacheReadInputTokens", 0) + kv[1].get("cacheCreationInputTokens", 0)),
-    )[:MAX_MODELS]
-    return dict(ranked)
+def bucket_total(bucket):
+    return sum(bucket.get(k, 0) for k in
+               ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"))
 
 seen = set()
 sessions = set()
@@ -207,9 +197,9 @@ print(json.dumps({
     "todayPrompts": t_prompts,
     "todaySessions": len(today_sids),
     "todayTotalTokens": t_tokens,
-    "todayTokensByModel": cap_model_counts(t_models),
+    "todayTokensByModel": top_models(t_models, lambda v: v),
     "recentDays": [{"date": d, "messageCount": recent[d]} for d in recent_dates],
-    "modelUsage": cap_model_buckets(models),
+    "modelUsage": top_models(models, bucket_total),
     "totalPrompts": prompts,
     "totalSessions": len(sessions),
     "activeDays": len(kept_active),

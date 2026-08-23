@@ -13,6 +13,8 @@ import Quickshell.Io
 // 2. Regenerates the dsh usage record on a cadence so the Agents panel keeps
 //    its DSH tab fresh (omarchy-agent-usage-update only knows packaged
 //    collectors, so this service owns the dsh record).
+// 3. Re-runs scripts/install-webapp at startup; it exits immediately when the
+//    desktop entry is healthy, repairs it otherwise (plugin rename/reinstall).
 Item {
   id: root
 
@@ -39,19 +41,19 @@ Item {
   }
 
   function writeWebUrl(url) {
-    if (!url || url === root.webUrl)
+    if (!url || url === root.webUrl || !isLocalWebUrl(url))
       return
-    if (!isLocalWebUrl(url)) {
-      console.log("ziouf.dsh: ignoring non-local URL reported by dsh: " + url)
-      return
-    }
     root.webUrl = url
     urlFile.path = root.stateDir + "/web-url"
     urlFile.setText(url + "\n")
   }
 
+  // The bash wrapper execs the server only when dsh exists; otherwise it
+  // exits at once and the watchdog simply retries — no separate probe.
   Process {
     id: webServer
+
+    command: ["bash", "-c", "command -v dsh >/dev/null && exec dsh web --no-open"]
 
     stdout: SplitParser {
       onRead: data => {
@@ -64,34 +66,13 @@ Item {
     onExited: console.log("ziouf.dsh: dsh web exited, watchdog will restart it")
   }
 
-  // Starts the server when it is not running and dsh is installed. Runs every
-  // few seconds; cheap because Process.running makes it a no-op otherwise.
   Timer {
     interval: root.watchdogIntervalSec * 1000
     running: true
     repeat: true
     triggeredOnStart: true
-    onTriggered: {
-      if (webServer.running)
-        return
-      checkDsh.command = ["bash", "-lc", "command -v dsh >/dev/null && echo yes || echo no"]
-      checkDsh.running = true
-    }
-  }
-
-  Process {
-    id: checkDsh
-
-    stdout: StdioCollector {
-      id: dshProbe
-
-      onStreamFinished: {
-        if (dshProbe.text.trim() === "yes" && !webServer.running) {
-          webServer.command = ["dsh", "web", "--no-open"]
-          webServer.running = true
-        }
-      }
-    }
+    onTriggered: if (!webServer.running)
+      webServer.running = true
   }
 
   FileView {
@@ -101,7 +82,7 @@ Item {
     atomicWrites: true
   }
 
-  // Ensures ~/.local/state/omarchy/dsh exists before the first URL write.
+  // Ensures the state directory exists before the first URL write.
   Process {
     id: mkdirProcess
 
@@ -109,39 +90,15 @@ Item {
   }
 
   Process {
-    id: collectProcess
-
-    command: [root.pluginDir + "/scripts/collect-usage"]
-  }
-
-  // The web-app .desktop carries an absolute Exec path into this plugin
-  // folder, so renaming or reinstalling the plugin under a different id would
-  // silently strand it. On startup: if the entry is missing or its Exec no
-  // longer resolves to an executable file, regenerate it.
-  Process {
-    id: healWebapp
+    id: initWebapp
 
     command: [root.pluginDir + "/scripts/install-webapp"]
   }
 
   Process {
-    id: checkWebapp
+    id: collectProcess
 
-    command: ["bash", "-lc",
-      "f=\"$HOME/.local/share/applications/DeepSeek Harness.desktop\"; " +
-      "x=$(sed -n 's/^Exec=//p' \"$f\"); " +
-      "[[ -n $x && -x $x ]] && echo ok || echo broken"]
-
-    stdout: StdioCollector {
-      id: webappProbe
-
-      onStreamFinished: {
-        if (webappProbe.text.trim() !== "ok") {
-          console.log("ziouf.dsh: repairing DeepSeek Harness desktop entry")
-          healWebapp.running = true
-        }
-      }
-    }
+    command: [root.pluginDir + "/scripts/collect-usage"]
   }
 
   Timer {
@@ -155,6 +112,6 @@ Item {
 
   Component.onCompleted: {
     mkdirProcess.running = true
-    checkWebapp.running = true
+    initWebapp.running = true
   }
 }

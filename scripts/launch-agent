@@ -8,7 +8,7 @@
 # web UI (kept running in the background by this plugin's service) as a
 # dedicated app window, reusing an existing one instead of stacking windows.
 
-PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 agent=$(omarchy-default-agent 2>/dev/null || true)
 if [[ $agent != "dsh" ]]; then
